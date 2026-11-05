@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>About | Recipient Map USA</title>
+<meta name="description" content="See who received US federal grants and similar funding from January to September 2024, by state and county.">
+<meta property="og:title" content="About | Recipient Map USA">
+<meta property="og:description" content="See who received US federal grants and similar funding from January to September 2024, by state and county.">
+<meta property="og:type" content="website">
+
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Libre+Franklin:wght@400;500;600;800&display=swap">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../" data-page="about">
+<a class="skip" href="#content">Skip to content</a>
+<div class="topbar"><div class="topin">
+  <a class="brand" href="../">Recipient Map USA</a>
+  <nav aria-label="Main"><a href="../">Map</a><a href="../recipients/">Recipients</a><a href="../programs/">Programs</a><a href="../about/" aria-current="page">About</a></nav>
+</div></div>
+<main class="wrap" id="content">
+<header class="hero"><h1>About this map</h1>
+<p class="lede">This site shows where federal grants and similar funding went, based on public records. It shows who received money. It does not show fraud, waste or misuse.</p></header>
+<div class="prose">
+<section><h2>How the total was built</h2><table class="data funnel"><tbody><tr><td>Rows in the archive for 2024</td><td class="num r">$4,670.2B</td></tr><tr><td>After removing repeated award actions</td><td class="num r">$3,595.1B</td></tr><tr><td>January to September only, without whole-award totals</td><td class="num r">$3,267.8B</td></tr><tr><td>Without records grouped as multiple recipients, redacted or individual</td><td class="num r">$1,157.8B</td></tr><tr><td>Without pensions, insurance, loans and foreign recipients</td><td class="num r">$1,144.2B</td></tr></tbody></table></section>
+<section><h2>What to keep in mind</h2><ul>
+<li>Figures are net obligations reported to the government, including reductions. They are not audited and they are not cash spent.</li>
+<li>Money is placed at the recipient's address. A state agency may pass funds to local groups in other counties.</li>
+<li>The source table repeated many award actions, once with a transaction ID and once without. This site counts each action once.</li>
+<li>Ohio, Minnesota and Washington also have whole-award totals that overlap their award actions, so those rows are removed. October to December is left out for every state because those three have only such rows for that period.</li>
+<li>People are not listed by name. Payments reported as individuals or redacted are excluded, and names that look personal stay out of the lists unless they total $5M or more. This filter is automatic and may make mistakes.</li>
+<li>Connecticut planning regions are matched to the nearest older county. About $19B has no county on the map, mostly U.S. territories.</li>
+<li>Recipients are grouped by their federal ID where one exists. An organization with several IDs, such as a university with several campuses, appears more than once.</li>
+</ul></section>
+
+<section><h2>Sources</h2><p>Funding data comes from the <a href="https://huggingface.co/datasets/somaliscan/spending-archive" rel="noopener">SomaliScan archive</a> (CC0), which draws on <a href="https://www.usaspending.gov/" rel="noopener">USAspending.gov</a>. This site is independent and is not connected to any government agency or to SomaliScan.</p></section>
+</div>
+</main>
+<footer><div class="footin">
+  <p>Independent project, not a government site. A listing shows who received money and says nothing about misuse.</p>
+  <p>Data: <a href="https://huggingface.co/datasets/somaliscan/spending-archive" rel="noopener">SomaliScan archive</a> (CC0), drawn from <a href="https://www.usaspending.gov/" rel="noopener">USAspending.gov</a>. Map shapes: <a href="https://github.com/topojson/us-atlas" rel="noopener">us-atlas</a>.</p>
+</div></footer>
+<div id="tip" hidden></div>
+<script src="../assets/app.js" defer></script>
+</body>
+</html>
