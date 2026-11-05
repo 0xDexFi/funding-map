@@ -102,7 +102,7 @@
     function nice(v) {
       if (v <= 0) return v;
       var p = Math.pow(10, Math.floor(Math.log10(v)) - 1);
-      return Math.round(v / p) * p;
+      return Math.floor(v / p) * p;
     }
     // Quantile classes over the places on screen, so the full color range is always in use.
     function makeScale(entities) {
@@ -110,11 +110,14 @@
       if (VIEW.mode === 'chg') return { div: true, breaks: CHG };
       vals.sort(function (a, b) { return a - b; });
       var br = [];
-      for (var i = 1; i < STEPS; i++) {
-        if (!vals.length) break;
-        var b = nice(vals[Math.min(vals.length - 1, Math.floor(vals.length * i / STEPS))]);
-        if (!br.length || b > br[br.length - 1]) br.push(b);
-      }
+      // With few places, each gets its own shade; otherwise split into STEPS equal-sized groups.
+      var cuts = [];
+      if (vals.length <= STEPS) for (var j = 1; j < vals.length; j++) cuts.push(vals[j]);
+      else for (var i = 1; i < STEPS; i++) cuts.push(vals[Math.floor(vals.length * i / STEPS)]);
+      cuts.forEach(function (c) {
+        var b = nice(c);
+        if (b > vals[0] && (!br.length || b > br[br.length - 1])) br.push(b);
+      });
       return { div: false, breaks: br };
     }
     function cls(v) {

@@ -220,7 +220,8 @@ for st in all_states:
             now, prev = co_now.get(f, {}), co_prev.get(f, {})
             rows = sorted(lists[f]['rows'], key=lambda r: -(r['amount'] or 0)) if f in lists else []
             pub = [r for r in rows if listed(r['name'], r['amount'] or 0)]
-            hidden = sum(1 for r in rows if (r['amount'] or 0) > 0 and not listed(r['name'], r['amount']))
+            hidden = sum(1 for r in rows if (r['amount'] or 0) > 0 and (r['name'] or '').upper() not in EXCLUDED
+                         and not listed(r['name'], r['amount']))
             for r in pub:
                 if r['recipient_id']:
                     where.setdefault(r['recipient_id'], f)
