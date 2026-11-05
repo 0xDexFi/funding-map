@@ -1,12 +1,15 @@
 # Recipient Map USA
 
-A static website showing who received US federal grants and similar funding from January to September 2024, by state and county. A listing shows who received money. It says nothing about misuse.
+A static website showing who received US federal grants in fiscal year 2025 (October 2024 to September 2025), by state and county, using official data from the free [USAspending.gov API](https://api.usaspending.gov/). A listing shows who received money. It says nothing about misuse.
+
+The map can be colored by total, per person, or change since the year before, filtered by funding agency, and zoomed and dragged.
 
 ## What is in this folder
 
 - `site/` is the finished website. This is the only folder a host needs.
 - `web/` holds the site's script, styles and icon.
 - `pipeline/` holds the scripts that rebuild the data and pages.
+- `.github/workflows/refresh-data.yml` refreshes the data from USAspending.gov on the 5th of each month and commits it, so the site stays current on its own. You can also run it from the **Actions** tab.
 
 ## Deploy with GitHub and Cloudflare (recommended)
 
@@ -42,13 +45,13 @@ Don't open `site/index.html` by double-clicking it. Browsers block its data file
 
 ## Rebuild
 
-Needs Python 3.11 or later and `pip install duckdb`.
-
-Download `federal_grants/_year=2024/data_0.parquet` from the [SomaliScan archive](https://huggingface.co/datasets/somaliscan/spending-archive), then run:
+Needs only Python 3.10 or later; no packages and no API key.
 
 ```bash
-python pipeline/build_data.py data_0.parquet site_data
+python pipeline/fetch_data.py site_data
 CONTACT="you@example.com" SITE_URL="https://your-site.pages.dev" python pipeline/build_site.py site_data site
 ```
 
-`SITE_URL` turns on the preview image for links shared on social media.
+The fetch makes about 3,300 requests to the USAspending.gov API and takes roughly 10 to 20 minutes. Responses are cached in `pipeline/.cache`, so a rerun after an error picks up where it stopped; delete that folder to pull fresh numbers. Set `FY=2026` to show a different fiscal year.
+
+`SITE_URL` turns on the preview image for links shared on social media. For the monthly GitHub refresh, set `CONTACT` and `SITE_URL` as repository variables under **Settings → Secrets and variables → Actions → Variables**.
