@@ -3,7 +3,7 @@
 
 Usage: python build_site.py <data folder> <output folder>
 """
-import html, json, os, re, shutil, sys
+import hashlib, html, json, os, re, shutil, sys
 
 DATA, OUT = sys.argv[1], sys.argv[2]
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -13,6 +13,10 @@ SITE_URL = os.environ.get('SITE_URL', '').strip().rstrip('/')   # enables the so
 SITE = 'Recipient Map USA'
 DESC = None  # set once nation.json is loaded
 
+def _ver(name):
+    return hashlib.sha1(open(os.path.join(WEB, name), 'rb').read()).hexdigest()[:10]
+VER = {f: _ver(f) for f in ('app.js', 'style.css')}
+DATA_VER = hashlib.sha1(b''.join(open(os.path.join(dp, f), 'rb').read() for dp, _, fs in sorted(os.walk(DATA)) for f in sorted(fs))).hexdigest()[:10]
 load = lambda p: json.load(open(os.path.join(DATA, p), encoding='utf8'))
 esc = html.escape
 N = load('nation.json')
@@ -53,9 +57,9 @@ def page(path, title, body, *, root, active='', desc=None, attrs=''):
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Libre+Franklin:wght@400;500;600;800&display=swap">
-<link rel="stylesheet" href="{root}assets/style.css">
+<link rel="stylesheet" href="{root}assets/style.css?v={VER['style.css']}">
 </head>
-<body data-root="{root or './'}" {attrs}>
+<body data-root="{root or './'}" data-v="{DATA_VER}" {attrs}>
 <a class="skip" href="#content">Skip to content</a>
 <div class="topbar"><div class="topin">
   <a class="brand" href="{root or './'}">{SITE}</a>
@@ -69,7 +73,7 @@ def page(path, title, body, *, root, active='', desc=None, attrs=''):
   <p>Data: <a href="https://www.usaspending.gov/" rel="noopener">USAspending.gov</a>, the official source for federal spending, pulled {esc(N['built'])}. Map shapes: <a href="https://github.com/topojson/us-atlas" rel="noopener">us-atlas</a>.</p>
 </div></footer>
 <div id="tip" hidden></div>
-<script src="{root}assets/app.js" defer></script>
+<script src="{root}assets/app.js?v={VER['app.js']}" defer></script>
 </body>
 </html>
 '''
@@ -162,7 +166,7 @@ open(os.path.join(OUT, '_headers'), 'w').write('''/*
 /data/*
   Cache-Control: public, max-age=86400
 /assets/*
-  Cache-Control: public, max-age=3600
+  Cache-Control: public, max-age=300, must-revalidate
 ''')
 open(os.path.join(OUT, 'robots.txt'), 'w').write('User-agent: *\nAllow: /\n')
 

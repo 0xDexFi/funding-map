@@ -9,7 +9,7 @@
 
   function $(id) { return document.getElementById(id); }
   function data(path) {
-    return fetch(new URL('data/' + path, ROOT)).then(function (r) {
+    return fetch(new URL('data/' + path + (body.dataset.v ? '?v=' + body.dataset.v : ''), ROOT)).then(function (r) {
       if (!r.ok) throw new Error('Could not load ' + path);
       return r.json();
     });

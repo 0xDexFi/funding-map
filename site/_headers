@@ -5,4 +5,4 @@
 /data/*
   Cache-Control: public, max-age=86400
 /assets/*
-  Cache-Control: public, max-age=3600
+  Cache-Control: public, max-age=300, must-revalidate
