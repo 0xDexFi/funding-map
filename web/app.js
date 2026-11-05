@@ -54,7 +54,7 @@
     var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
     var ST_BINS = [5e9, 1e10, 2.5e10, 5e10, 1e11], CO_BINS = [1e6, 1e7, 1e8, 1e9, 1e10];
     var N = null, G = null, cache = {}, cur = { st: null, fp: null }, drawn = null, stEls = {}, seq = 0;
-    var showAll = false;
+    var showAll = false, back = null;
 
     function bin(v, bins) { var i = 0; while (i < bins.length && v >= bins[i]) i++; return 'q' + i; }
     function el(tag, cls, d) {
@@ -212,6 +212,10 @@
       legend(mapped);
       ledger();
       crumbs();
+      if (back) {
+        back.hidden = !cur.st;
+        back.textContent = cur.fp ? '\u2190 Back to ' + S.n : '\u2190 Back to United States';
+      }
       var c = S && cur.fp ? S.co[cur.fp] : null;
       var t = c ? c.n + ', ' + S.n : S ? S.n : null;
       document.title = t ? t + ' | ' + SITE : SITE;
@@ -256,6 +260,25 @@
       go(a.dataset.t, null);
     });
     window.addEventListener('popstate', function () { if (N) fromUrl(); });
+
+    // Zoom out one level: county -> state -> United States.
+    function zoomOut() {
+      if (cur.fp) go(cur.st, null);
+      else if (cur.st) go(null, null);
+    }
+    back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'btn zoomout';
+    back.hidden = true;
+    map.parentNode.insertBefore(back, map);
+    back.addEventListener('click', zoomOut);
+    // Clicking empty space on the map also zooms out.
+    map.addEventListener('click', function (e) { if (e.target === map) zoomOut(); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape' || !cur.st) return;
+      if (e.target.closest && e.target.closest('input, textarea, select')) return;
+      zoomOut();
+    });
 
     var q = $('q'), res = $('results'), search = null, low = null, names = null;
     function lookup() {

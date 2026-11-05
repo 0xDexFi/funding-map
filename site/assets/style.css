@@ -48,7 +48,9 @@ h1 { font: 800 clamp(28px, 4vw, 42px)/1.05 var(--display); letter-spacing: -0.02
 .crumbs span { color: var(--muted); }
 .crumbs b { font-weight: 600; }
 .main { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr); gap: 24px; align-items: start; }
-.plate { display: grid; gap: 10px; min-width: 0; }
+.plate { display: grid; gap: 10px; min-width: 0; position: relative; }
+.zoomout { position: absolute; top: 0; left: 0; z-index: 2; background: var(--bg); }
+.zoomout[hidden] { display: none; }
 svg#map { background: none; width: 100%; height: auto; display: block; aspect-ratio: 975 / 610; touch-action: manipulation; }
 #map path.st, #map path.co { stroke: var(--line); vector-effect: non-scaling-stroke; cursor: pointer; }
 #map path.st { stroke-width: .8; }
