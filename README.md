@@ -2,7 +2,7 @@
 
 A static website showing who received US federal grants in fiscal year 2025 (October 2024 to September 2025), by state and county, using official data from the free [USAspending.gov API](https://api.usaspending.gov/). A listing shows who received money. It says nothing about misuse.
 
-The map can be colored by total, per person, or change since the year before, filtered by funding agency, and zoomed and dragged.
+The map can be colored by total, per person, or change since the year before, filtered by funding agency or program, and zoomed and dragged. It flags unusual patterns (see the Patterns page) and can compare up to four states or counties side by side.
 
 ## What is in this folder
 

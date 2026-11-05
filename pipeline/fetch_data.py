@@ -22,6 +22,12 @@ PUBLIC_MIN = 5_000_000                        # personal-looking names stay unli
 SEARCH_MIN = 250_000                          # smallest recipient included in site search
 LIST_MAX = 100                                # recipients listed per county
 AGENCY_COUNT = 8                              # agencies offered as map filters
+# Programs offered as map filters, by Assistance Listing number, with a short plain name.
+PROGRAMS = {'93.778': 'Medicaid', '20.205': 'Highways', '97.036': 'Disaster recovery (FEMA)',
+            '10.555': 'School lunch', '93.767': "Children's health insurance (CHIP)", '84.010': 'Title I schools',
+            '93.558': 'Cash assistance (TANF)', '11.035': 'Broadband (BEAD)', '84.027': 'Special education',
+            '93.600': 'Head Start', '20.507': 'Public transit', '14.228': 'Community development (CDBG)',
+            '93.575': 'Child care', '10.557': 'WIC nutrition', '10.561': 'SNAP administration', '20.106': 'Airports'}
 
 def period(fy):
     return [{'start_date': f'{fy - 1}-10-01', 'end_date': f'{fy}-09-30'}]
@@ -149,18 +155,38 @@ def add_ct(target, fy, extra=None):
 add_ct(co_now, FY)
 add_ct(co_prev, PREV)
 
-# 2. Agencies offered as map filters ------------------------------------------------------------
-print('Agencies')
+# 2. Map filters: the largest agencies and a set of well-known programs -------------------------
+print('Map filters')
 ag_rows = category('awarding_agency', FY, 20)['results']
 agencies = [r for r in ag_rows if r['name']][:AGENCY_COUNT]
-AG = [[r['code'] or str(r['id']), agency_short(r['name'])] for r in agencies]
-ag_state, ag_county = {}, {}
-for r, (key, _) in zip(agencies, AG):
-    flt = {'agencies': [{'type': 'awarding', 'tier': 'toptier', 'name': r['name']}]}
-    ag_state[key] = {k: rnd(v['aggregated_amount']) for k, v in geography('state', FY, **flt).items()}
-    cc = geography('county', FY, **flt)
-    add_ct(cc, FY, flt)
-    ag_county[key] = {k: v['aggregated_amount'] for k, v in cc.items()}
+FILTERS = []      # [key, label, kind, api filter]
+for r in agencies:
+    FILTERS.append(['a:' + (r['code'] or str(r['id'])), agency_short(r['name']), 'agency',
+                    {'agencies': [{'type': 'awarding', 'tier': 'toptier', 'name': r['name']}]}])
+for code, label in PROGRAMS.items():
+    FILTERS.append(['p:' + code, label, 'program', {'program_numbers': [code]}])
+flt_state, flt_county = {}, {}
+for key, label, kind, flt in FILTERS:
+    print(' ', label, flush=True)
+    for fy in (FY, PREV):
+        flt_state[key, fy] = {k: v['aggregated_amount'] or 0 for k, v in geography('state', fy, **flt).items()}
+        cc = geography('county', fy, **flt)
+        add_ct(cc, fy, flt)
+        flt_county[key, fy] = {k: v['aggregated_amount'] or 0 for k, v in cc.items()}
+# Drop programs with no money this year.
+FILTERS = [f for f in FILTERS if sum(flt_state[f[0], FY].values()) > 0]
+
+def filter_values(lookup):
+    out = {}
+    for key, *_ in FILTERS:
+        now, prev = rnd(flt_county_or_state(lookup, key, FY)), rnd(flt_county_or_state(lookup, key, PREV))
+        if now or prev:
+            out[key] = [now, prev]
+    return out
+
+def flt_county_or_state(lookup, key, fy):
+    kind, code = lookup
+    return (flt_county if kind == 'c' else flt_state)[key, fy].get(code, 0)
 
 # 3. Recipients in every county with money ------------------------------------------------------
 print('Recipients by county')
@@ -209,6 +235,7 @@ def rec_row(r):
     return [r['name'], rnd(r['amount']), r['recipient_id'] or '']
 
 where = {}       # recipient id -> county FIPS, for the national lists
+recs = {}
 search, summary = [], {}
 for st in all_states:
     fips = FIPS_OF.get(st)
@@ -229,7 +256,8 @@ for st in all_states:
                     search.append([r['name'], f, rnd(r['amount'])])
             co[f] = {'n': names[f], 'a': rnd(now.get('aggregated_amount')), 'p': rnd(prev.get('aggregated_amount')),
                      'pop': now.get('population') or prev.get('population') or 0,
-                     'ag': {k: rnd(ag_county[k].get(f)) for k, _ in AG if ag_county[k].get(f)},
+                     'f': filter_values(('c', f)),
+                     'top': next(([r['name'], rnd(r['amount'])] for r in rows if r['name'] and r['name'].upper() not in EXCLUDED), None),
                      'h': hidden, 'more': lists[f]['more'] if f in lists else False,
                      'r': [rec_row(r) for r in pub[:LIST_MAX]]}
     pub = [r for r in top if listed(r['name'], r['amount'] or 0)]
@@ -243,9 +271,87 @@ for st in all_states:
            't': [rec_row(r) for r in pub[:10 if co else LIST_MAX]], 'co': co,
            's': {f: shapes['c'][f] for f in shapes['c'] if f[:2] == fips} if st in shapes['s'] else {},
            'b': shapes['s'][st][1] if st in shapes['s'] else None}
-    dump(f'st/{st}.json', rec)
+    recs[st] = rec
     summary[st] = {'n': rec['n'], 'a': rec['a'], 'p': rec['p'], 'pop': rec['pop'], 'map': st in shapes['s'],
-                   'ag': {k: ag_state[k].get(st, 0) for k, _ in AG}}
+                   'f': filter_values(('s', st))}
+
+# 5b. Unusual patterns ---------------------------------------------------------------------------
+# Flags point to places worth a closer look. They describe the numbers only; an unusual pattern is
+# often explained by a state agency, a university or a one-off project, and is never proof of a problem.
+STATE_WORDS = re.compile(r"\b(STATE OF|COMMONWEALTH OF|DEPARTMENT|DEPT|DIVISION|OFFICE OF|EXECUTIVE OFFICE|CABINET|COMMISSION|COMMN|AGENCY|STATE BOARD|COMPTROLLER|TREASURER|GOVERNOR|HOMELAND SECURITY)\b")
+NOT_STATE = re.compile(r"\b(UNIVERSITY|UNIV|COLLEGE|COUNTY|CITY|TOWN|VILLAGE|DISTRICT|TRIBE|TRIBAL|NATION|NATIONAL|INC|LLC|FOUNDATION|HOSPITAL|REDEVELOPMENT|COMMUNITY ACTION|HOUSING AUTHORITY OF|TRANSIT|ASSOCIATION|ASSN|COUNCIL|SOCIETY|CHURCH|CENTER)\b")
+def state_agency(name, st):
+    """A recipient that looks like part of the state government."""
+    u = (name or '').upper()
+    if NOT_STATE.search(u):
+        return False
+    named = STATE_NAMES.get(st, '#').upper() in u or re.search(r'\b' + st + r'S?\b', u)
+    return bool(STATE_WORDS.search(u) or named)
+
+def median(xs):
+    xs = sorted(xs)
+    return xs[len(xs) // 2] if xs else 0
+
+# State agencies pass most of their money on to the rest of the state, so per-person comparisons
+# leave them out ("local" grants).
+def local(c, st):
+    return c['a'] - sum(r[1] for r in c['r'] if state_agency(r[0], st))
+counties = [(st, f, c) for st, r in recs.items() for f, c in r['co'].items() if c['a'] > 0 and c['pop'] >= 1000]
+pops = sorted(c['pop'] for _, _, c in counties)
+bands = [pops[int(len(pops) * i / 10)] for i in range(1, 10)]
+def band(pop):
+    return sum(1 for b in bands if pop >= b)
+peer_pp = collections.defaultdict(list)
+for st, _, c in counties:
+    peer_pp[band(c['pop'])].append(max(0, local(c, st)) / c['pop'])
+peer_med = {k: median(v) for k, v in peer_pp.items()}
+
+# The county in each state where state agencies get the most money is treated as the seat of
+# state government; its flags are marked as likely explained by that.
+seat = {}
+for st, r in recs.items():
+    best = max(r['co'].items(), key=lambda kv: kv[1]['a'] - local(kv[1], st), default=None)
+    if best and best[1]['a'] - local(best[1], st) > 0:
+        seat[st] = best[0]
+
+flags = []
+for st, r in recs.items():
+    for f, c in r['co'].items():
+        fl, a, p = [], c['a'], c['p']
+        top = c.get('top')
+        sa = 1 if top and state_agency(top[0], st) else 0
+        if top and not sa and a >= 10_000_000 and top[1] / a >= 0.8:
+            shown = top[0] if listed(top[0], top[1]) else ''
+            fl.append(['conc', round(top[1] / a, 3), shown, sa])
+        loc = local(c, st)
+        if loc >= 5_000_000 and c['pop'] >= 1000:
+            med = peer_med.get(band(c['pop']), 0)
+            if med and loc / c['pop'] >= 5 * med:
+                fl.append(['pp', round(loc / c['pop'] / med, 1), round(med), 1 if seat.get(st) == f else 0])
+        if a >= 5_000_000 and p >= 0 and a >= 2 * max(p, 1):
+            fl.append(['up', round((a - p) / p, 2) if p >= 500_000 else -1])
+        if p >= 5_000_000 and a <= 0.5 * p:
+            fl.append(['down', round((a - p) / p, 2)])
+        if fl:
+            c['fl'] = fl
+            if seat.get(st) == f:
+                c['seat'] = 1
+            flags.append([f, c['n'], st, a, fl, 1 if seat.get(st) == f else 0])
+    # States: compared with the other states.
+st_pp = median([v['a'] / v['pop'] for v in summary.values() if v['map'] and v['pop']])
+for st, v in summary.items():
+    fl = []
+    if v['map'] and v['pop'] and v['a'] / v['pop'] >= 1.75 * st_pp:
+        fl.append(['pp', round(v['a'] / v['pop'] / st_pp, 1), round(st_pp), 0])
+    if v['p'] >= 1e8 and v['a'] >= 1.25 * v['p']:
+        fl.append(['up', round((v['a'] - v['p']) / v['p'], 2)])
+    if v['p'] >= 1e8 and v['a'] <= 0.8 * v['p']:
+        fl.append(['down', round((v['a'] - v['p']) / v['p'], 2)])
+    if fl:
+        v['fl'] = recs[st]['fl'] = fl
+flags.sort(key=lambda x: (x[5], -x[3]))
+for st, rec in recs.items():
+    dump(f'st/{st}.json', rec)
 
 def place_of(r):
     return where.get(r['recipient_id'], '')
@@ -263,13 +369,16 @@ nation = {'fy': FY, 'period': f'October {FY - 1} to September {FY}', 'prev_perio
           'pop': sum(v['pop'] for v in summary.values()),
           'g': [[agency_short(x['name']), rnd(x['amount'])] for x in nat_ag if x['name']],
           't': [[r[0], r[1], r[4], r[3] or r[2]] for r in top500[:10]],
-          'agencies': AG, 'states': summary, 'built': time.strftime('%Y-%m-%d')}
+          'filters': [[k, l, kind] for k, l, kind, _ in FILTERS], 'states': summary,
+          'flag_rules': {'conc': 0.8, 'pp': 5, 'up': 2, 'down': 0.5, 'st_pp': 1.75, 'st_up': 0.25, 'st_down': 0.2}, 'built': time.strftime('%Y-%m-%d')}
 search.sort(key=lambda r: -r[2])
 dump('nation.json', nation)
 dump('shapes.json', {'s': shapes['s'], 'm': shapes['m']})
 dump('search.json', search)
 dump('top.json', top500)
 dump('programs.json', prog_out)
+dump('flags.json', flags)
 print(json.dumps({'fy': FY, 'total': total, 'prev': nation['p'], 'awards': award_count, 'search': len(search),
-                  'top': len(top500), 'programs': len(prog_out), 'states': len(summary),
+                  'top': len(top500), 'programs': len(prog_out), 'states': len(summary), 'flags': len(flags),
+                  'flag_types': collections.Counter(x[0] for fl in flags for x in fl[4]),
                   'unplaced': sum(json.load(open(f'{OUT}/st/{s}.json'))['u'] for s in summary if summary[s]['map'])}))

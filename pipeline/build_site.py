@@ -39,7 +39,7 @@ def page(path, title, body, *, root, active='', desc=None, attrs=''):
     desc = desc or DESC
     full = title if title == SITE else f'{title} | {SITE}'
     nav = ''.join(f'<a href="{root}{h}"{" aria-current=\"page\"" if active == k else ""}>{t}</a>'
-                  for k, h, t in [('map', '', 'Map'), ('recipients', 'recipients/', 'Recipients'),
+                  for k, h, t in [('map', '', 'Map'), ('recipients', 'recipients/', 'Recipients'), ('patterns', 'patterns/', 'Patterns'),
                                   ('programs', 'programs/', 'Programs'), ('about', 'about/', 'About')])
     og = f'<meta property="og:image" content="{SITE_URL}/assets/og.png">\n<meta name="twitter:card" content="summary_large_image">' if SITE_URL else ''
     doc = f'''<!doctype html>
@@ -212,6 +212,45 @@ page('programs/index.html', 'Programs', f'''<header class="hero"><h1>Programs</h
 <div class="tablewrap"><table class="data"><thead><tr><th>#</th><th>Listing</th><th>Program</th><th>Agency</th><th class="r">Grants</th></tr></thead>
 <tbody>{trs}</tbody></table></div>''', root='../', active='programs', attrs='data-page="programs"')
 
+# Patterns
+flags = load('flags.json')
+FLAG_SHORT = {'conc': 'One recipient dominates', 'pp': 'High per person', 'up': 'Big increase', 'down': 'Big drop'}
+def flag_text(x):
+    prev = f"FY{N['fy'] - 1}"
+    if x[0] == 'conc':
+        return f"One recipient got {round(x[1] * 100)}% of the money" + (f": {x[2].rstrip('.')}" if x[2] else '') + ('. Likely a state agency that passes money on.' if x[3] else '.')
+    if x[0] == 'pp':
+        return f"{x[1]}× the grants per person of similar-sized counties (typical: ${x[2]:,}), not counting state agencies based here." + (' This county is the seat of state government, so other state offices likely explain much of it.' if x[3] else '')
+    if x[0] == 'up':
+        return f'New money: almost none in {prev}.' if x[1] < 0 else f'Up {round(x[1] * 100):,}% since {prev}.'
+    return f'Down {abs(round(x[1] * 100))}% since {prev}.'
+counts = {k: sum(1 for f in flags if any(x[0] == k for x in f[4])) for k in FLAG_SHORT}
+R = N['flag_rules']
+ptrs = []
+for f in flags:
+    st = f[2]
+    href = f'../{st.lower()}/?county={f[0]}&flags=1'
+    tags = ''.join(f'<i class="tag t-{x[0]}">{FLAG_SHORT[x[0]]}</i> ' for x in f[4])
+    detail = '<br>'.join(esc(flag_text(x)) for x in f[4])
+    ptrs.append(f'<tr data-t="{" ".join(x[0] for x in f[4])}" data-s="{st}"><td><a href="{href}">{esc(f[1])}</a></td><td>{esc(N["states"][st]["n"])}</td>'
+                f'<td class="num r">{money(f[3])}</td><td>{tags}<div class="sub">{detail}</div></td></tr>')
+st_opts = ''.join(f'<option value="{k}">{esc(v["n"])}</option>' for k, v in sorted(N['states'].items(), key=lambda kv: kv[1]['n']) if v['map'])
+page('patterns/index.html', 'Unusual patterns', f'''<header class="hero"><h1>Unusual patterns</h1>
+<p class="lede">{len(flags):,} counties where the FY{N['fy']} grant numbers stand out. A flag means a place is worth a closer look. It is not evidence of fraud, waste or misuse; most flags have ordinary explanations, such as a state agency, university or hospital based in the county, or a one-time project.</p></header>
+<div class="prose"><section><h2>What each flag means</h2><ul>
+<li><i class="tag t-conc">One recipient dominates</i> One organization other than a state agency received at least {round(R['conc'] * 100)}% of a county's grants, in counties with $10M or more.</li>
+<li><i class="tag t-pp">High per person</i> Grants per person are at least {R['pp']}× the typical county of similar population, in counties with $5M or more. Counties are grouped into ten population bands. State agencies are left out of this test because they pass most of their money on to the rest of the state.</li>
+<li><i class="tag t-up">Big increase</i> Grants at least doubled since FY{N['fy'] - 1}, to $5M or more.</li>
+<li><i class="tag t-down">Big drop</i> Grants fell by half or more from at least $5M in FY{N['fy'] - 1}.</li>
+</ul></section></div>
+<div class="patterns-filters filters">
+  <select id="pt" aria-label="Filter by pattern"><option value="">All patterns</option>{''.join(f'<option value="{k}">{v} ({counts[k]:,})</option>' for k, v in FLAG_SHORT.items())}</select>
+  <select id="ps" aria-label="Filter by state"><option value="">All states</option>{st_opts}</select>
+</div>
+<p class="sub" id="pnote">{len(flags):,} counties, largest first. Seats of state government are listed last because state offices likely explain their numbers.</p>
+<div class="tablewrap"><table class="data" id="ptable"><thead><tr><th>County</th><th>State</th><th class="r">Grants</th><th>Pattern</th></tr></thead>
+<tbody>{''.join(ptrs)}</tbody></table></div>''', root='../', active='patterns', attrs='data-page="patterns"')
+
 # About
 contact = (f'<section><h2>Corrections</h2><p>If a listing looks wrong, contact {esc(CONTACT)}. Include the recipient name and the county.</p></section>' if CONTACT else '')
 page('about/index.html', 'About', f'''<header class="hero"><h1>About this map</h1>
@@ -229,6 +268,8 @@ page('about/index.html', 'About', f'''<header class="hero"><h1>About this map</h
 <li>People are not listed by name. Records USAspending groups as multiple recipients, redacted or individual are left out of the lists, and names that look personal stay out unless they total $5M or more. This filter is automatic and may make mistakes.</li>
 <li>Connecticut reports by its nine planning regions. Each region is shown in the older county that holds most of it, so Tolland County shows no figure.</li>
 <li>Each county lists its largest 100 recipients. Every listed name links to its record on USAspending.gov.</li>
+<li>The <a href="../patterns/">Unusual patterns</a> page flags counties whose numbers stand out: one recipient getting most of the money, very high grants per person for the county's size, or a big rise or fall since last year. A flag is a reason to look closer, not evidence of a problem.</li>
+<li>Compare mode lines up to four states or counties side by side. Agency and program rows are per person so places of different sizes can be compared.</li>
 </ul></section>
 {contact}
 <section><h2>Sources</h2><p>All figures come from the free <a href="https://api.usaspending.gov/" rel="noopener">USAspending.gov API</a>, run by the U.S. Treasury, and were pulled on {esc(N['built'])}. This site is independent and is not connected to any government agency.</p></section>

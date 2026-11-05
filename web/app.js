@@ -39,11 +39,13 @@
     return id ? '<a class="nm" href="' + PROFILE + encodeURIComponent(id) + '/latest" target="_blank" rel="noopener" title="Open on USAspending.gov">' + esc(name) + '</a>'
       : '<span class="nm">' + esc(name) + '</span>';
   }
-  var VIEW = { mode: 'total', ag: '' };
+  var VIEW = { mode: 'total', ag: '', flags: false, cmp: [] };
   function viewQuery() {
     var p = [];
     if (VIEW.mode !== 'total') p.push('view=' + VIEW.mode);
-    if (VIEW.ag) p.push('agency=' + encodeURIComponent(VIEW.ag));
+    if (VIEW.ag) p.push('filter=' + encodeURIComponent(VIEW.ag));
+    if (VIEW.flags) p.push('flags=1');
+    if (VIEW.cmp.length) p.push('cmp=' + VIEW.cmp.join(','));
     return p.join('&');
   }
   function stateUrl(st, f) {
@@ -90,11 +92,13 @@
     map.appendChild(gStates); map.appendChild(gCounties); map.appendChild(mesh);
 
     /* Metrics ----------------------------------------------------------------------------- */
-    function amount(e) { return VIEW.ag ? (e.ag && e.ag[VIEW.ag]) || 0 : e.a; }
+    function fv(e, k) { return (e.f && e.f[k]) || [0, 0]; }
+    function amount(e) { return VIEW.ag ? fv(e, VIEW.ag)[0] : e.a; }
+    function prevAmount(e) { return VIEW.ag ? fv(e, VIEW.ag)[1] : e.p; }
     function metric(e) {
       if (!e) return null;
       if (VIEW.mode === 'pp') return e.pop ? amount(e) / e.pop : null;
-      if (VIEW.mode === 'chg') return e.p > 0 && !VIEW.ag ? (e.a - e.p) / e.p : null;
+      if (VIEW.mode === 'chg') return prevAmount(e) > 0 ? (amount(e) - prevAmount(e)) / prevAmount(e) : null;
       return amount(e) > 0 ? amount(e) : null;
     }
     function fmt(v) { return v == null ? 'No data' : VIEW.mode === 'pp' ? perHead(v) + ' per person' : VIEW.mode === 'chg' ? pct(v) : money(v); }
@@ -140,15 +144,67 @@
       return null;
     }
 
+    /* Unusual patterns ---------------------------------------------------------------------- */
+    var FLAG_SHORT = { conc: 'One recipient dominates', pp: 'High per person', up: 'Big increase', down: 'Big drop' };
+    function flagText(x, isState) {
+      var prev = 'FY' + (N.fy - 1);
+      if (x[0] === 'conc') return 'One recipient got ' + Math.round(x[1] * 100) + '% of the money' + (x[2] ? ': ' + x[2].replace(/\.+$/, '') : '') +
+        (x[3] ? '. Likely a state agency that passes money on.' : '.');
+      if (x[0] === 'pp') return x[1] + '× the grants per person of ' + (isState ? 'the typical state' : 'similar-sized counties') +
+        ' (typical: ' + perHead(x[2]) + ')' + (isState ? '.' : ', not counting state agencies based here.') +
+        (x[3] ? ' This county is the seat of state government, so other state offices likely explain much of it.' : '');
+      if (x[0] === 'up') return x[1] < 0 ? 'New money: almost none in ' + prev + '.' : 'Up ' + pct(x[1]).replace('+', '') + ' since ' + prev + '.';
+      if (x[0] === 'down') return 'Down ' + pct(x[1]).replace('−', '') + ' since ' + prev + '.';
+      return '';
+    }
+    var FLAGS = null;
+    function loadFlags() {
+      if (FLAGS) return Promise.resolve(FLAGS);
+      return data('flags.json').then(function (x) { FLAGS = x; return x; });
+    }
+    function flagSection() {
+      var S = cur.st ? cache[cur.st] : null, h = '', items = [];
+      var note = '<p class="sub">Worth a closer look, not proof of a problem. <a href="' + new URL('patterns/', ROOT).href + '">How flags work and the full list</a></p>';
+      function li(key, name, fl, sub) {
+        return '<li><button type="button" class="rk" data-k="' + key + '"><span>' + esc(name) + (sub ? '<small>' + esc(sub) + '</small>' : '') +
+          '</span><span class="tags">' + fl.map(function (x) { return '<i class="tag t-' + x[0] + '">' + esc(FLAG_SHORT[x[0]]) + '</i>'; }).join('') + '</span></button></li>';
+      }
+      if (S && cur.fp) {
+        var c = S.co[cur.fp];
+        if (!c || !c.fl) return '';
+        return '<div class="flags"><h3>⚑ Unusual patterns</h3><ul class="fl">' + c.fl.map(function (x) {
+          return '<li><b>' + esc(FLAG_SHORT[x[0]]) + '.</b> ' + esc(flagText(x, false)) + '</li>';
+        }).join('') + '</ul>' + note + '</div>';
+      }
+      if (S) {
+        if (S.fl) h += '<ul class="fl">' + S.fl.map(function (x) { return '<li><b>' + esc(S.n) + ':</b> ' + esc(flagText(x, true)) + '</li>'; }).join('') + '</ul>';
+        items = Object.keys(S.co).filter(function (f) { return S.co[f].fl; })
+          .sort(function (a, b) { return ((S.co[a].seat || 0) - (S.co[b].seat || 0)) || S.co[b].a - S.co[a].a; });
+        if (!h && !items.length) return '';
+        return '<div class="flags"><h3>⚑ Unusual patterns' + (items.length ? ' · ' + items.length + ' counties' : '') + '</h3>' + h +
+          (items.length ? '<ol class="rank">' + items.slice(0, 8).map(function (f) { return li(f, S.co[f].n, S.co[f].fl, money(S.co[f].a)); }).join('') + '</ol>' : '') + note + '</div>';
+      }
+      var sts = Object.keys(N.states).filter(function (k) { return N.states[k].fl; }).sort(function (a, b) { return N.states[b].a - N.states[a].a; });
+      h = '<div class="flags"><h3>⚑ Unusual patterns</h3>';
+      if (sts.length) h += '<ol class="rank">' + sts.slice(0, 6).map(function (k) { return li(k, N.states[k].n, N.states[k].fl, 'State'); }).join('') + '</ol>';
+      if (FLAGS) h += '<h3>Largest flagged counties</h3><ol class="rank">' + FLAGS.slice(0, 6).map(function (x) {
+        return li(x[0], x[1] + ', ' + (N.states[x[2]] ? N.states[x[2]].n : x[2]), x[4], money(x[3]));
+      }).join('') + '</ol>';
+      else loadFlags().then(function () { if (!cur.st) ledger(); });
+      return h + note + '</div>';
+    }
+
     /* Tooltip ----------------------------------------------------------------------------- */
     function describe(e, name) {
       if (!e) return [name, 'No recorded grants'];
       var lines = [money(e.a) + ' in grants'];
       if (VIEW.ag) lines.push(agName() + ': ' + money(amount(e)));
       if (e.pop) lines.push(perHead(amount(e) / e.pop) + ' per person');
-      if (e.p > 0) lines.push(pct((e.a - e.p) / e.p) + ' vs FY' + (N.fy - 1));
+      if (prevAmount(e) > 0) lines.push(pct((amount(e) - prevAmount(e)) / prevAmount(e)) + ' vs FY' + (N.fy - 1));
       var r = rankOf(e);
       if (r) lines.push('#' + r[0] + ' of ' + r[1] + ' by ' + modeLabel().toLowerCase());
+      if (e.fl) lines.push('⚑ ' + e.fl.map(function (x) { return FLAG_SHORT[x[0]]; }).join(' · '));
+      if (matchMedia('(hover: hover)').matches) lines.push('Shift-click to compare');
       return [name, lines.join('\n')];
     }
     function tipOn(p, fn) {
@@ -163,11 +219,14 @@
       });
       p.addEventListener('pointerleave', function () { tip.hidden = true; });
     }
-    function clickable(p, label, fn) {
+    function clickable(p, label, fn, key) {
       p.setAttribute('tabindex', '0');
       p.setAttribute('role', 'button');
       p.setAttribute('aria-label', label);
-      p.addEventListener('click', fn);
+      p.addEventListener('click', function (e) {
+        if (e.shiftKey || e.metaKey || e.ctrlKey) { e.preventDefault(); toggleCompare(key); return; }
+        fn();
+      });
       p.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); }
       });
@@ -176,7 +235,7 @@
       mesh.setAttribute('d', G.m);
       Object.keys(G.s).forEach(function (k) {
         var v = N.states[k], p = el('path', 'st', G.s[k][0]);
-        clickable(p, v ? v.n : k, function () { go(k, null); });
+        clickable(p, v ? v.n : k, function () { go(k, null); }, k);
         tipOn(p, function () { return describe(v, v ? v.n : k); });
         gStates.appendChild(p);
         stEls[k] = p;
@@ -190,7 +249,7 @@
         var v = S.co[f], p = el('path', 'co', S.s[f]);
         p.dataset.f = f;
         var name = v ? v.n : 'County ' + f;
-        clickable(p, name, function () { go(S.st, f); });
+        clickable(p, name, function () { go(S.st, f); }, f);
         tipOn(p, function () { return describe(v && v.a ? v : null, name); });
         gCounties.appendChild(p);
         coEls[f] = p;
@@ -201,15 +260,17 @@
       scale = makeScale(entitiesOnScreen());
       Object.keys(stEls).forEach(function (k) {
         var p = stEls[k];
-        p.setAttribute('class', 'st ' + cls(metric(N.states[k])) + (mapped && k !== S.st ? ' dim' : ''));
+        p.setAttribute('class', 'st ' + cls(metric(N.states[k])) + (mapped && k !== S.st ? ' dim' : '') +
+          (VIEW.flags && !mapped && N.states[k] && N.states[k].fl ? ' flg' : ''));
         p.style.visibility = mapped && k === S.st ? 'hidden' : '';
         p.setAttribute('aria-label', N.states[k] ? N.states[k].n + ', ' + fmt(metric(N.states[k])) : k);
       });
       Object.keys(coEls).forEach(function (f) {
         var v = S.co[f], m = v && v.a ? metric(v) : null;
-        coEls[f].setAttribute('class', 'co ' + cls(m) + (f === cur.fp ? ' on' : ''));
+        coEls[f].setAttribute('class', 'co ' + cls(m) + (f === cur.fp ? ' on' : '') + (VIEW.flags && v && v.fl ? ' flg' : ''));
         coEls[f].setAttribute('aria-label', (v ? v.n : 'County ' + f) + ', ' + fmt(m));
       });
+      if (VIEW.flags) Array.prototype.forEach.call(map.querySelectorAll('path.flg'), function (p) { p.parentNode.appendChild(p); });
       legend(mapped);
     }
 
@@ -322,7 +383,7 @@
     /* Map controls ------------------------------------------------------------------------ */
     function modeLabel() { return VIEW.mode === 'pp' ? 'Per person' : VIEW.mode === 'chg' ? 'Change' : 'Total'; }
     function agName() {
-      for (var i = 0; i < N.agencies.length; i++) if (N.agencies[i][0] === VIEW.ag) return N.agencies[i][1];
+      for (var i = 0; i < N.filters.length; i++) if (N.filters[i][0] === VIEW.ag) return N.filters[i][1];
       return '';
     }
     function buildControls() {
@@ -331,9 +392,13 @@
         [['total', 'Total'], ['pp', 'Per person'], ['chg', 'Change since FY' + (N.fy - 1)]].map(function (m) {
           return '<button type="button" role="radio" data-mode="' + m[0] + '">' + esc(m[1]) + '</button>';
         }).join('') + '</div>' +
-        '<label class="agsel"><span>Funding agency</span><select id="agency"><option value="">All agencies</option>' +
-        N.agencies.map(function (a) { return '<option value="' + esc(a[0]) + '">' + esc(a[1]) + '</option>'; }).join('') +
-        '</select></label>';
+        '<label class="agsel"><span>Show</span><select id="agency"><option value="">All grants</option>' +
+        [['agency', 'By funding agency'], ['program', 'By program']].map(function (g) {
+          return '<optgroup label="' + g[1] + '">' + N.filters.filter(function (x) { return x[2] === g[0]; }).map(function (a) {
+            return '<option value="' + esc(a[0]) + '">' + esc(a[1]) + '</option>';
+          }).join('') + '</optgroup>';
+        }).join('') + '</select></label>' +
+        '<button type="button" class="flagbtn" id="flagbtn" aria-pressed="false" title="Outline places with unusual patterns">⚑ Unusual patterns</button>';
       bar.addEventListener('click', function (e) {
         var b = e.target.closest('button[data-mode]');
         if (!b || b.disabled) return;
@@ -342,7 +407,10 @@
       });
       $('agency').addEventListener('change', function () {
         VIEW.ag = this.value;
-        if (VIEW.ag && VIEW.mode === 'chg') VIEW.mode = 'total';
+        viewChanged();
+      });
+      $('flagbtn').addEventListener('click', function () {
+        VIEW.flags = !VIEW.flags;
         viewChanged();
       });
       var z = $('zoomctl');
@@ -361,10 +429,9 @@
     function syncControls() {
       Array.prototype.forEach.call($('mapbar').querySelectorAll('button[data-mode]'), function (b) {
         b.setAttribute('aria-checked', String(b.dataset.mode === VIEW.mode));
-        b.disabled = b.dataset.mode === 'chg' && !!VIEW.ag;
-        b.title = b.disabled ? 'Change is shown for all agencies only' : '';
       });
       $('agency').value = VIEW.ag;
+      $('flagbtn').setAttribute('aria-pressed', String(VIEW.flags));
     }
     function viewChanged() {
       syncControls();
@@ -437,10 +504,15 @@
         var c = (e.a - e.p) / e.p;
         bits.push('<b class="' + (c > 0.05 ? 'up' : c < -0.05 ? 'down' : '') + '">' + pct(c) + '</b> vs FY' + (N.fy - 1));
       }
-      var h = '<div><h2>' + esc(name) + '</h2><div class="sub">' + esc(sub) + '</div></div><div><div class="big">' + money(e.a) + '</div>' +
+      var key = cur.fp || cur.st, inCmp = key && VIEW.cmp.indexOf(key) >= 0;
+      var cb = key ? '<button type="button" class="btn cmpbtn" data-cmp="' + key + '" aria-pressed="' + inCmp + '">' + (inCmp ? '✓ In comparison' : '+ Compare') + '</button>' : '';
+      var h = '<div class="lhead"><div><h2>' + esc(name) + '</h2><div class="sub">' + esc(sub) + '</div></div>' + cb + '</div><div><div class="big">' + money(e.a) + '</div>' +
         '<div class="sub">in grants, ' + esc(N.period) + '</div>' + (bits.length ? '<div class="kpis">' + bits.join('') + '</div>' : '') + '</div>';
-      if (VIEW.ag) h += '<div class="agline"><span>' + esc(agName()) + '</span><b class="num">' + money(amount(e)) + '</b>' +
-        '<span class="sub">' + (e.a > 0 ? pct(amount(e) / e.a).replace('+', '') + ' of all grants here' : '') + '</span></div>';
+      if (VIEW.ag) {
+        var pa = prevAmount(e), ch = pa > 0 ? ' · ' + pct((amount(e) - pa) / pa) + ' vs FY' + (N.fy - 1) : '';
+        h += '<div class="agline"><span>' + esc(agName()) + '</span><b class="num">' + money(amount(e)) + '</b>' +
+          '<span class="sub">' + (e.a > 0 ? pct(amount(e) / e.a).replace('+', '') + ' of all grants here' : '') + esc(ch) + '</span></div>';
+      }
       return h;
     }
     function ranking() {
@@ -460,7 +532,7 @@
     function ledger() {
       var L = $('ledger'), st = cur.st, f = cur.fp, S = st ? cache[st] : null, h;
       if (!S) {
-        h = head('United States', N, 'All states and territories') + ranking() +
+        h = head('United States', N, 'All states and territories') + ranking() + flagSection() +
           '<div><h3>Top recipients</h3>' + rows(N.t.map(function (r) { return [r[0], r[1], r[2]]; }), N.a) + '</div>' + agencies(N.g, N.a);
         L.innerHTML = h;
         return;
@@ -472,12 +544,12 @@
           return;
         }
         var list = showAll ? c.r : c.r.slice(0, 25);
-        h = head(c.n + ', ' + S.n, c, 'County') + '<div><h3>Recipients</h3>' + rows(list, c.a) + '</div>';
+        h = head(c.n + ', ' + S.n, c, 'County') + flagSection() + '<div><h3>Recipients</h3>' + rows(list, c.a) + '</div>';
         if (c.r.length > list.length) h += '<button type="button" class="btn" id="more">Show all ' + c.r.length + '</button>';
         if (c.more) h += '<p class="sub">Showing the largest ' + c.r.length + ' recipients. Open a name to see its full record on USAspending.gov.</p>';
         if (c.h) h += '<p class="sub">' + c.h.toLocaleString() + ' recipients with personal-looking names are counted but not listed.</p>';
       } else {
-        h = head(S.n, S, S.b ? 'State' : 'Territory or freely associated state') + ranking() +
+        h = head(S.n, Object.assign({}, S, { f: N.states[S.st] && N.states[S.st].f, fl: N.states[S.st] && N.states[S.st].fl }), S.b ? 'State' : 'Territory or freely associated state') + ranking() + flagSection() +
           '<div><h3>Top recipients</h3>' + rows(S.t, S.a) + '</div>' + agencies(S.g, S.a);
         if (S.u > S.a * 0.01) h += '<p class="sub">' + money(S.u) + ' went to recipients without a county on file.</p>';
       }
@@ -488,9 +560,11 @@
       $('csv').addEventListener('click', function () { download(S, f); });
     }
     $('ledger').addEventListener('click', function (e) {
+      var c = e.target.closest('.cmpbtn');
+      if (c) return toggleCompare(c.dataset.cmp);
       var b = e.target.closest('.rk');
       if (!b) return;
-      if (/^\d/.test(b.dataset.k)) go(cur.st, b.dataset.k); else go(b.dataset.k, null);
+      if (/^\d/.test(b.dataset.k)) go(ST_FIPS[b.dataset.k.slice(0, 2)], b.dataset.k); else go(b.dataset.k, null);
     });
     $('ledger').addEventListener('pointerover', function (e) {
       var b = e.target.closest('.rk'), p = b && (stEls[b.dataset.k] || coEls[b.dataset.k]);
@@ -551,10 +625,12 @@
       var m = location.pathname.match(/\/([a-z]{2})\/$/);
       if (m && N.states[m[1].toUpperCase()]) st = m[1].toUpperCase();
       else if (location.href.split(/[?#]/)[0] === ROOT.href) st = null;
-      var mode = qs.get('view'), ag = qs.get('agency') || '';
+      var mode = qs.get('view'), ag = qs.get('filter') || '';
       VIEW.mode = mode === 'pp' || mode === 'chg' ? mode : 'total';
-      VIEW.ag = N.agencies.some(function (a) { return a[0] === ag; }) ? ag : '';
-      if (VIEW.ag && VIEW.mode === 'chg') VIEW.mode = 'total';
+      VIEW.ag = N.filters.some(function (a) { return a[0] === ag; }) ? ag : '';
+      VIEW.flags = qs.get('flags') === '1';
+      VIEW.cmp = (qs.get('cmp') || '').split(',').filter(function (k) { return /^([A-Z]{2}|\d{5})$/.test(k); }).slice(0, 4);
+      renderCompare();
       syncControls();
       go(st, f && /^\d{5}$/.test(f) ? f : null, { push: false });
     }
@@ -572,6 +648,98 @@
       go(a.dataset.t, null);
     });
     window.addEventListener('popstate', function () { if (N) fromUrl(); });
+
+    /* Compare ------------------------------------------------------------------------------ */
+    var cmpBox = document.createElement('section'), pill = document.createElement('a');
+    cmpBox.className = 'compare'; cmpBox.id = 'compare'; cmpBox.hidden = true;
+    cmpBox.setAttribute('aria-label', 'Compare places');
+    document.querySelector('.main').insertAdjacentElement('afterend', cmpBox);
+    pill.className = 'cmppill'; pill.href = '#compare'; pill.hidden = true;
+    document.body.appendChild(pill);
+    function stOf(k) { return /^\d/.test(k) ? ST_FIPS[k.slice(0, 2)] : k; }
+    function entity(k) {
+      var S = cache[stOf(k)];
+      if (!S) return null;
+      if (/^\d/.test(k)) {
+        var c = S.co[k];
+        return c && { key: k, n: c.n + ', ' + S.n, a: c.a, p: c.p, pop: c.pop, f: c.f, fl: c.fl, top: c.top, isState: false };
+      }
+      var v = N.states[k] || {};
+      return { key: k, n: S.n, a: S.a, p: S.p, pop: S.pop, f: v.f, fl: v.fl, top: S.t[0] ? [S.t[0][0], S.t[0][1]] : null, isState: true };
+    }
+    function toggleCompare(k) {
+      if (!k) return;
+      var i = VIEW.cmp.indexOf(k);
+      if (i >= 0) VIEW.cmp.splice(i, 1);
+      else {
+        if (VIEW.cmp.length >= 4) VIEW.cmp.shift();
+        VIEW.cmp.push(k);
+      }
+      renderCompare();
+      viewChanged();
+    }
+    function renderCompare() {
+      var keys = VIEW.cmp;
+      pill.hidden = !keys.length;
+      pill.textContent = 'Compare (' + keys.length + ') ↓';
+      if (!keys.length) { cmpBox.hidden = true; cmpBox.innerHTML = ''; return; }
+      var need = keys.map(stOf).filter(function (st, i, a) { return N.states[st] && !cache[st] && a.indexOf(st) === i; });
+      if (need.length) {
+        Promise.all(need.map(function (st) { return data('st/' + st + '.json').then(function (S) { cache[st] = S; }); }))
+          .then(renderCompare).catch(function () {});
+        return;
+      }
+      var E = keys.map(entity).filter(Boolean);
+      function row(label, vals, show, cls) {
+        var max = Math.max.apply(null, vals.map(function (v) { return v == null ? 0 : Math.abs(v); }).concat([0]));
+        return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><th scope="row">' + esc(label) + '</th>' + vals.map(function (v) {
+          if (v == null) return '<td class="na">—</td>';
+          var w = max > 0 ? Math.abs(v) / max * 100 : 0;
+          return '<td><span class="num">' + esc(show(v)) + '</span><span class="cbar' + (v < 0 ? ' neg' : '') + '"><i style="width:' + Math.max(w, 1).toFixed(1) + '%"></i></span></td>';
+        }).join('') + '</tr>';
+      }
+      function head(t) { return '<tr class="sect"><th colspan="' + (E.length + 1) + '">' + esc(t) + '</th></tr>'; }
+      var h = '<div class="chead"><h2>Compare</h2><p class="sub">Up to four states or counties. Add the place you are viewing with <b>+ Compare</b>, or Shift-click places on the map.</p>' +
+        '<button type="button" class="btn" data-clear="1">Clear all</button></div>';
+      if (E.length < 2) h += '<p class="empty">Add one more place to compare.</p>';
+      h += '<div class="tablewrap"><table class="cmp"><thead><tr><th></th>' + E.map(function (e) {
+        return '<th scope="col"><button type="button" class="cgo" data-go="' + e.key + '">' + esc(e.n) + '</button>' +
+          '<button type="button" class="cx" data-rm="' + e.key + '" aria-label="Remove ' + esc(e.n) + '">×</button></th>';
+      }).join('') + '</tr></thead><tbody>';
+      h += row('Grants, FY' + N.fy, E.map(function (e) { return e.a; }), money);
+      h += row('Per person', E.map(function (e) { return e.pop ? e.a / e.pop : null; }), perHead);
+      h += row('Change since FY' + (N.fy - 1), E.map(function (e) { return e.p > 0 ? (e.a - e.p) / e.p : null; }), pct);
+      h += row('Population', E.map(function (e) { return e.pop || null; }), function (v) { return Math.round(v).toLocaleString(); });
+      h += '<tr><th scope="row">Largest recipient</th>' + E.map(function (e) {
+        return e.top ? '<td><span class="small">' + esc(e.top[0]) + '</span><span class="sub"> ' + (e.a > 0 ? Math.round(e.top[1] / e.a * 100) + '% of total' : '') + '</span></td>' : '<td class="na">—</td>';
+      }).join('') + '</tr>';
+      h += '<tr><th scope="row">Unusual patterns</th>' + E.map(function (e) {
+        return '<td>' + (e.fl ? e.fl.map(function (x) { return '<i class="tag t-' + x[0] + '" title="' + esc(flagText(x, e.isState)) + '">' + esc(FLAG_SHORT[x[0]]) + '</i>'; }).join(' ') : '<span class="sub">None</span>') + '</td>';
+      }).join('') + '</tr>';
+      [['agency', 'By funding agency, per person'], ['program', 'By program, per person']].forEach(function (g) {
+        var fs = N.filters.filter(function (x) { return x[2] === g[0] && E.some(function (e) { return e.f && e.f[x[0]] && e.f[x[0]][0] > 0; }); });
+        if (!fs.length) return;
+        h += head(g[1]);
+        fs.forEach(function (x) {
+          h += row(x[1], E.map(function (e) { var v = e.f && e.f[x[0]] ? e.f[x[0]][0] : 0; return e.pop ? v / e.pop : null; }), perHead,
+            VIEW.ag === x[0] ? 'cur' : '');
+        });
+      });
+      h += '</tbody></table></div><p class="sub">Per-person rows make places of different sizes comparable. Money is counted where the recipient is based, so counties with a state capital or a large university can look high.</p>';
+      cmpBox.innerHTML = h;
+      cmpBox.hidden = false;
+    }
+    cmpBox.addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.rm) toggleCompare(b.dataset.rm);
+      else if (b.dataset.clear) { VIEW.cmp = []; renderCompare(); viewChanged(); }
+      else if (b.dataset.go) {
+        var k = b.dataset.go;
+        if (/^\d/.test(k)) go(stOf(k), k); else go(k, null);
+        window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+      }
+    });
 
     // Zoom out one level: county -> state -> United States.
     function zoomOut() {
@@ -665,6 +833,22 @@
     sel.addEventListener('change', function () { ready(run); });
   }
 
+  function patternsPage() {
+    var t = $('pt'), st = $('ps'), rowsEl = document.querySelectorAll('#ptable tbody tr'), note = $('pnote');
+    function run() {
+      var n = 0;
+      Array.prototype.forEach.call(rowsEl, function (r) {
+        var ok = (!t.value || r.dataset.t.split(' ').indexOf(t.value) >= 0) && (!st.value || r.dataset.s === st.value);
+        r.hidden = !ok;
+        if (ok) n++;
+      });
+      note.textContent = n.toLocaleString() + ' counties, largest first.';
+    }
+    t.addEventListener('change', run);
+    st.addEventListener('change', run);
+  }
+
   if (body.dataset.page === 'map') mapPage();
+  if (body.dataset.page === 'patterns') patternsPage();
   if (body.dataset.page === 'recipients') recipientsPage();
 })();
